@@ -6,6 +6,7 @@ import textwrap
 # visualization settings
 GENERATE_TREEMAP = True
 GENERATE_SUNBURST = True
+GENERATE_CSV = True
 
 # program colors
 program_colors = {
@@ -53,8 +54,12 @@ def lighten_color(hex_color, factor=0.4):
 # data loading
 df = pd.read_csv('00OUf000008PyafMAC_mapped.csv')
 
-# filter out rows with missing program, strategy, or amount values
-df_clean = df[['Program', 'Strategy', 'Amount']].dropna()
+# filter out rows with missing program or amount, but keep rows with missing strategy
+df_clean = df[['Program', 'Strategy', 'Amount']].copy()
+df_clean = df_clean[df_clean['Program'].notna() & df_clean['Amount'].notna()]
+
+# replace null/blank strategies with "unspecified"
+df_clean['Strategy'] = df_clean['Strategy'].fillna('unspecified')
 
 # group by program and strategy, summing amounts
 df_grouped = df_clean.groupby(['Program', 'Strategy'], as_index=False)['Amount'].sum()
@@ -63,7 +68,6 @@ df_grouped = df_clean.groupby(['Program', 'Strategy'], as_index=False)['Amount']
 total_amount = df_grouped['Amount'].sum()
 
 # treemap visualization
-
 if GENERATE_TREEMAP:
     print("generating treemap...")
 
@@ -96,8 +100,8 @@ if GENERATE_TREEMAP:
         # use lightened version of program color for strategies
         colors.append(lighten_color(program_colors.get(program, '#CCCCCC')))
 
-        # hide text for very small boxes (less than 1% of total)
-        if amount / total_amount < 0.01:
+        # hide text for very small boxes (less than 1% of total) or unspecified strategies
+        if amount / total_amount < 0.01 or strategy == 'unspecified':
             custom_text.append('')  # empty string hides the label
         else:
             custom_text.append(wrap_text(strategy))
@@ -162,16 +166,6 @@ if GENERATE_SUNBURST:
         # use lightened version of program color for strategies
         colors.append(lighten_color(program_colors.get(program, '#CCCCCC')))
 
-    # add very small filler segments to complete the circle
-    # calculate what percentage of the total each program represents
-    for program in df_grouped['Program'].unique():
-        # add a tiny filler segment (0.01% of program total) in light grey
-        filler_amount = program_totals[program] * 0.0001
-        labels.append(f'_filler_{program}')
-        parents.append(program)
-        values.append(filler_amount)
-        colors.append('#F5F5F5')  # very light grey
-
     # create the sunburst chart
     fig = go.Figure(go.Sunburst(
         labels=labels,
@@ -196,6 +190,15 @@ if GENERATE_SUNBURST:
     output_path = 'outputs/sunburst_program_strategy.png'
     fig.write_image(output_path)
     print(f"sunburst chart saved to {output_path}")
+
+# csv pivot table
+if GENERATE_CSV:
+    print("generating csv pivot table...")
+
+    # export the grouped data as csv
+    output_path = 'outputs/pivot_program_strategy.csv'
+    df_grouped.to_csv(output_path, index=False)
+    print(f"csv pivot table saved to {output_path}")
 
 # summary
 print(f"\ntotal amount visualized: ${total_amount:,.0f}")
