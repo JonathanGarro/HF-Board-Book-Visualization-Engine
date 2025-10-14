@@ -136,11 +136,17 @@ if GENERATE_TREEMAP:
     fig.write_image(output_path)
     print(f"treemap saved to {output_path}")
 
+    # save as interactive html
+    output_path_html = 'outputs/treemap_program_strategy.html'
+    fig.write_html(output_path_html)
+    print(f"interactive treemap saved to {output_path_html}")
+
 # sunburst visualization
 if GENERATE_SUNBURST:
     print("generating sunburst...")
 
     # create lists for sunburst
+    ids = []
     labels = []
     parents = []
     values = []
@@ -151,6 +157,7 @@ if GENERATE_SUNBURST:
 
     # first, add program level (parents)
     for program in df_grouped['Program'].unique():
+        ids.append(program)
         labels.append(program)
         parents.append('')  # no parent for top level
         values.append(program_totals[program])
@@ -162,6 +169,9 @@ if GENERATE_SUNBURST:
         strategy = row['Strategy']
         amount = row['Amount']
 
+        # create unique id for strategy
+        strategy_id = f"{program}_{strategy}_{idx}"
+        ids.append(strategy_id)
         labels.append(strategy)
         parents.append(program)
         values.append(amount)
@@ -170,6 +180,7 @@ if GENERATE_SUNBURST:
 
     # create the sunburst chart
     fig = go.Figure(go.Sunburst(
+        ids=ids,
         labels=labels,
         parents=parents,
         values=values,
@@ -193,6 +204,11 @@ if GENERATE_SUNBURST:
     fig.write_image(output_path)
     print(f"sunburst chart saved to {output_path}")
 
+    # save as interactive html
+    output_path_html = 'outputs/sunburst_program_strategy.html'
+    fig.write_html(output_path_html)
+    print(f"interactive sunburst chart saved to {output_path_html}")
+
 # three-level sunburst visualization (program > strategy > top 5 orgs per strategy)
 if GENERATE_SUNBURST_THREE_LEVEL:
     print("generating three-level sunburst (program > strategy > top 5 orgs)...")
@@ -201,42 +217,33 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     df_three_level = df[['Program', 'Strategy', 'Organization: Organization Name', 'Amount']].copy()
     df_three_level = df_three_level.rename(columns={'Organization: Organization Name': 'Organization Name'})
     df_three_level = df_three_level[df_three_level['Program'].notna() &
-                                     df_three_level['Strategy'].notna() &
-                                     df_three_level['Organization Name'].notna() &
-                                     df_three_level['Amount'].notna()]
+                                    df_three_level['Strategy'].notna() &
+                                    df_three_level['Organization Name'].notna() &
+                                    df_three_level['Amount'].notna()]
 
     # replace null/blank strategies with "unspecified"
     df_three_level['Strategy'] = df_three_level['Strategy'].fillna('unspecified')
 
     # group by program, strategy, and organization
-    df_three_grouped = df_three_level.groupby(['Program', 'Strategy', 'Organization Name'], as_index=False)['Amount'].sum()
+    df_three_grouped = df_three_level.groupby(['Program', 'Strategy', 'Organization Name'], as_index=False)[
+        'Amount'].sum()
 
-    # for each program-strategy combination, get top 5 organizations and lump rest into "other"
+    # for each program-strategy combination, get top 5 organizations only
     result_rows = []
     for (program, strategy) in df_three_grouped[['Program', 'Strategy']].drop_duplicates().values:
         strategy_data = df_three_grouped[(df_three_grouped['Program'] == program) &
-                                          (df_three_grouped['Strategy'] == strategy)].copy()
+                                         (df_three_grouped['Strategy'] == strategy)].copy()
         strategy_data = strategy_data.sort_values('Amount', ascending=False)
 
         # get top 5 for this strategy
         top_5_strategy = strategy_data.head(5)
         result_rows.append(top_5_strategy)
 
-        # if there are more than 5 organizations, lump the rest into "other"
-        if len(strategy_data) > 5:
-            other_amount = strategy_data.iloc[5:]['Amount'].sum()
-            other_row = pd.DataFrame({
-                'Program': [program],
-                'Strategy': [strategy],
-                'Organization Name': ['Other'],
-                'Amount': [other_amount]
-            })
-            result_rows.append(other_row)
-
     # combine all results
     df_three_final = pd.concat(result_rows, ignore_index=True)
 
     # create lists for sunburst
+    ids = []
     labels = []
     parents = []
     values = []
@@ -250,6 +257,7 @@ if GENERATE_SUNBURST_THREE_LEVEL:
 
     # level 1: add program level (innermost ring)
     for program in df_three_final['Program'].unique():
+        ids.append(program)
         labels.append(program)
         parents.append('')  # no parent for top level
         values.append(program_totals[program])
@@ -257,9 +265,10 @@ if GENERATE_SUNBURST_THREE_LEVEL:
 
     # level 2: add strategy level (middle ring)
     for (program, strategy) in df_three_final[['Program', 'Strategy']].drop_duplicates().values:
-        # create unique strategy label to avoid duplicates across programs
-        strategy_label = f"{program}_{strategy}"
-        labels.append(strategy_label)
+        # create unique id for strategy to avoid duplicates across programs
+        strategy_id = f"{program}_{strategy}"
+        ids.append(strategy_id)
+        labels.append(strategy)  # display only strategy name
         parents.append(program)
         values.append(strategy_totals[(program, strategy)])
         # lighten program color for strategies
@@ -272,21 +281,22 @@ if GENERATE_SUNBURST_THREE_LEVEL:
         org = row['Organization Name']
         amount = row['Amount']
 
-        # create unique organization label
-        org_label = f"{program}_{strategy}_{org}_{idx}"
-        labels.append(org_label)
-        # parent is the unique strategy label
-        parents.append(f"{program}_{strategy}")
+        # create unique id for organization
+        org_id = f"{program}_{strategy}_{org}_{idx}"
+        strategy_id = f"{program}_{strategy}"
+
+        ids.append(org_id)
+        labels.append(org)  # display only organization name
+        # parent is the unique strategy id
+        parents.append(strategy_id)
         values.append(amount)
 
-        # use grey for "other", more lightened program color for specific organizations
-        if org == 'Other':
-            colors.append('#CCCCCC')
-        else:
-            colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.6))
+        # use more lightened program color for organizations
+        colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.6))
 
     # create the sunburst chart
     fig = go.Figure(go.Sunburst(
+        ids=ids,
         labels=labels,
         parents=parents,
         values=values,
