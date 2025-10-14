@@ -1,9 +1,4 @@
 ### Python template
-# Project specific
-*.csv
-outputs/
-v1/
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
