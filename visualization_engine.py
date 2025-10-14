@@ -7,6 +7,7 @@ import textwrap
 GENERATE_TREEMAP = True
 GENERATE_SUNBURST = True
 GENERATE_SUNBURST_THREE_LEVEL = True
+GENERATE_SUNBURST_FOUR_LEVEL = True
 GENERATE_CSV = True
 GENERATE_TREEMAP_TOP_GRANTEES = True
 
@@ -152,15 +153,12 @@ if GENERATE_SUNBURST:
     values = []
     colors = []
 
-    # calculate program totals
-    program_totals = df_grouped.groupby('Program')['Amount'].sum().to_dict()
-
     # first, add program level (parents)
     for program in df_grouped['Program'].unique():
         ids.append(program)
         labels.append(program)
         parents.append('')  # no parent for top level
-        values.append(program_totals[program])
+        values.append(0)  # set to 0 - plotly will calculate from children
         colors.append(program_colors.get(program, '#CCCCCC'))
 
     # then, add strategy level (children)
@@ -172,7 +170,8 @@ if GENERATE_SUNBURST:
         # create unique id for strategy
         strategy_id = f"{program}_{strategy}_{idx}"
         ids.append(strategy_id)
-        labels.append(strategy)
+        # hide label for unspecified strategies
+        labels.append('' if strategy.lower() == 'unspecified' else strategy)
         parents.append(program)
         values.append(amount)
         # use lightened version of program color for strategies
@@ -189,6 +188,7 @@ if GENERATE_SUNBURST:
             line=dict(width=2, color='white')
         ),
         insidetextorientation='radial',
+        textfont=dict(size=12),
         hovertemplate='<b>%{label}</b><br>Amount: %{value:,.0f}<extra></extra>'
     ))
 
@@ -203,6 +203,11 @@ if GENERATE_SUNBURST:
     output_path = 'outputs/sunburst_program_strategy.png'
     fig.write_image(output_path)
     print(f"sunburst chart saved to {output_path}")
+
+    # save as svg for editing in illustrator
+    output_path_svg = 'outputs/sunburst_program_strategy.svg'
+    fig.write_image(output_path_svg)
+    print(f"sunburst chart svg saved to {output_path_svg}")
 
     # save as interactive html
     output_path_html = 'outputs/sunburst_program_strategy.html'
@@ -249,18 +254,12 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     values = []
     colors = []
 
-    # calculate program totals
-    program_totals = df_three_final.groupby('Program')['Amount'].sum().to_dict()
-
-    # calculate strategy totals
-    strategy_totals = df_three_final.groupby(['Program', 'Strategy'])['Amount'].sum().to_dict()
-
     # level 1: add program level (innermost ring)
     for program in df_three_final['Program'].unique():
         ids.append(program)
         labels.append(program)
         parents.append('')  # no parent for top level
-        values.append(program_totals[program])
+        values.append(0)  # set to 0 - plotly will calculate from children
         colors.append(program_colors.get(program, '#CCCCCC'))
 
     # level 2: add strategy level (middle ring)
@@ -268,9 +267,10 @@ if GENERATE_SUNBURST_THREE_LEVEL:
         # create unique id for strategy to avoid duplicates across programs
         strategy_id = f"{program}_{strategy}"
         ids.append(strategy_id)
-        labels.append(strategy)  # display only strategy name
+        # hide label for unspecified strategies
+        labels.append('' if strategy.lower() == 'unspecified' else strategy)
         parents.append(program)
-        values.append(strategy_totals[(program, strategy)])
+        values.append(0)  # set to 0 - plotly will calculate from children
         # lighten program color for strategies
         colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.3))
 
@@ -324,6 +324,154 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     output_path_html = 'outputs/sunburst_three_level.html'
     fig.write_html(output_path_html)
     print(f"interactive three-level sunburst chart saved to {output_path_html}")
+
+# four-level sunburst visualization (program > strategy > substrategy > top 5 orgs)
+if GENERATE_SUNBURST_FOUR_LEVEL:
+    print("generating four-level sunburst (program > strategy > substrategy > top 5 orgs)...")
+
+    # prepare data with organization information
+    df_four_level = df[['Program', 'Strategy', 'Substrategy', 'Organization: Organization Name', 'Amount']].copy()
+    df_four_level = df_four_level.rename(columns={'Organization: Organization Name': 'Organization Name'})
+    df_four_level = df_four_level[df_four_level['Program'].notna() &
+                                   df_four_level['Strategy'].notna() &
+                                   df_four_level['Organization Name'].notna() &
+                                   df_four_level['Amount'].notna()]
+
+    # replace null/blank strategies and substrategies with "unspecified"
+    df_four_level['Strategy'] = df_four_level['Strategy'].fillna('unspecified')
+    df_four_level['Substrategy'] = df_four_level['Substrategy'].fillna('unspecified')
+
+    # group by program, strategy, substrategy, and organization
+    df_four_grouped = df_four_level.groupby(['Program', 'Strategy', 'Substrategy', 'Organization Name'],
+                                            as_index=False)['Amount'].sum()
+
+    # for each program-strategy-substrategy combination, get top 5 organizations only
+    result_rows = []
+    for (program, strategy, substrategy) in df_four_grouped[['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
+        substrategy_data = df_four_grouped[(df_four_grouped['Program'] == program) &
+                                           (df_four_grouped['Strategy'] == strategy) &
+                                           (df_four_grouped['Substrategy'] == substrategy)].copy()
+        substrategy_data = substrategy_data.sort_values('Amount', ascending=False)
+
+        # get top 5 for this substrategy
+        top_5_substrategy = substrategy_data.head(5)
+        result_rows.append(top_5_substrategy)
+
+        # if there are more than 5 organizations, lump the rest into "other"
+        if len(substrategy_data) > 5:
+            other_amount = substrategy_data.iloc[5:]['Amount'].sum()
+            other_count = len(substrategy_data) - 5
+            other_row = pd.DataFrame({
+                'Program': [program],
+                'Strategy': [strategy],
+                'Substrategy': [substrategy],
+                'Organization Name': [f'Other ({other_count})'],
+                'Amount': [other_amount]
+            })
+            result_rows.append(other_row)
+
+    # combine all results
+    df_four_final = pd.concat(result_rows, ignore_index=True)
+
+    # create lists for sunburst
+    ids = []
+    labels = []
+    parents = []
+    values = []
+    colors = []
+
+    # level 1: add program level (innermost ring)
+    for program in df_four_final['Program'].unique():
+        ids.append(program)
+        labels.append(program)
+        parents.append('')  # no parent for top level
+        values.append(0)  # set to 0 - plotly will calculate from children
+        colors.append(program_colors.get(program, '#CCCCCC'))
+
+    # level 2: add strategy level
+    for (program, strategy) in df_four_final[['Program', 'Strategy']].drop_duplicates().values:
+        # create unique id for strategy to avoid duplicates across programs
+        strategy_id = f"{program}_{strategy}"
+        ids.append(strategy_id)
+        # hide label for unspecified strategies
+        labels.append('' if strategy.lower() == 'unspecified' else strategy)
+        parents.append(program)
+        values.append(0)  # set to 0 - plotly will calculate from children
+        # lighten program color for strategies
+        colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.25))
+
+    # level 3: add substrategy level
+    for (program, strategy, substrategy) in df_four_final[['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
+        # create unique id for substrategy
+        strategy_id = f"{program}_{strategy}"
+        substrategy_id = f"{program}_{strategy}_{substrategy}"
+        ids.append(substrategy_id)
+        # hide label for unspecified substrategies
+        labels.append('' if substrategy.lower() == 'unspecified' else substrategy)
+        parents.append(strategy_id)
+        values.append(0)  # set to 0 - plotly will calculate from children
+        # further lighten program color for substrategies
+        colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.5))
+
+    # level 4: add organization level (outermost ring)
+    for idx, row in df_four_final.iterrows():
+        program = row['Program']
+        strategy = row['Strategy']
+        substrategy = row['Substrategy']
+        org = row['Organization Name']
+        amount = row['Amount']
+
+        # create unique id for organization
+        org_id = f"{program}_{strategy}_{substrategy}_{org}_{idx}"
+        substrategy_id = f"{program}_{strategy}_{substrategy}"
+
+        ids.append(org_id)
+        labels.append(org)  # display only organization name
+        # parent is the unique substrategy id
+        parents.append(substrategy_id)
+        values.append(amount)
+
+        # use grey for "other", otherwise use lightened program color
+        if org.startswith('Other'):
+            colors.append('#CCCCCC')
+        else:
+            colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.7))
+
+    # create the sunburst chart
+    fig = go.Figure(go.Sunburst(
+        ids=ids,
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(
+            colors=colors,
+            line=dict(width=2, color='white')
+        ),
+        insidetextorientation='radial',
+        hovertemplate='<b>%{label}</b><br>Amount: %{value:,.0f}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title='Grants by Program, Strategy, Substrategy, and Top 5 Organizations',
+        width=1600,
+        height=1600,
+        font_size=10
+    )
+
+    # save as static image
+    output_path = 'outputs/sunburst_four_level.png'
+    fig.write_image(output_path)
+    print(f"four-level sunburst chart saved to {output_path}")
+
+    # save as svg for editing in illustrator
+    output_path_svg = 'outputs/sunburst_four_level.svg'
+    fig.write_image(output_path_svg)
+    print(f"four-level sunburst chart svg saved to {output_path_svg}")
+
+    # save as interactive html
+    output_path_html = 'outputs/sunburst_four_level.html'
+    fig.write_html(output_path_html)
+    print(f"interactive four-level sunburst chart saved to {output_path_html}")
 
 # treemap by program and top 10 grantees per program
 if GENERATE_TREEMAP_TOP_GRANTEES:
