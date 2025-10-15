@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6acdd558-0630-44b0-b50d-7ce875bb6e60" name="Changes" comment="remove center ring on individual outputs">
+    <list default="true" id="6acdd558-0630-44b0-b50d-7ce875bb6e60" name="Changes" comment="sync workspace">
       <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -79,7 +79,7 @@
       <workItem from="1760388273189" duration="311000" />
       <workItem from="1760388723394" duration="1482000" />
       <workItem from="1760399727218" duration="517000" />
-      <workItem from="1760404542591" duration="22068000" />
+      <workItem from="1760404542591" duration="22089000" />
     </task>
     <task id="LOCAL-00001" summary="initial commit">
       <option name="closed" value="true" />
@@ -129,7 +129,15 @@
       <option name="project" value="LOCAL" />
       <updated>1760551565024</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="sync workspace">
+      <option name="closed" value="true" />
+      <created>1760551608544</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1760551608544</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -142,7 +150,8 @@
     <MESSAGE value="cleaner outputs" />
     <MESSAGE value="add other to outer sunburst ring" />
     <MESSAGE value="remove center ring on individual outputs" />
-    <option name="LAST_COMMIT_MESSAGE" value="remove center ring on individual outputs" />
+    <MESSAGE value="sync workspace" />
+    <option name="LAST_COMMIT_MESSAGE" value="sync workspace" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Data_Visualizations$debug.coverage" NAME="debug Coverage Results" MODIFIED="1760389184339" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
