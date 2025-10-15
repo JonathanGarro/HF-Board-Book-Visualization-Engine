@@ -11,6 +11,9 @@ GENERATE_SUNBURST_FOUR_LEVEL = True
 GENERATE_CSV = True
 GENERATE_TREEMAP_TOP_GRANTEES = True
 
+# threshold setting for angle-based visualizations (minimum angle in degrees)
+MIN_ANGLE_DEGREES = 10
+
 # program colors
 program_colors = {
     'EDUCATION': '#1A254E',
@@ -52,6 +55,100 @@ def lighten_color(hex_color, factor=0.4):
     b = int(b + (255 - b) * factor)
     # convert back to hex
     return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def calculate_angles_and_filter(df_grouped, min_angle=10):
+    """
+    calculate the angle each organization would occupy when its parent strategy
+    is fully visible (360 degrees) and filter out organizations below threshold
+    """
+    # group by program and strategy to get strategy totals
+    strategy_totals = df_grouped.groupby(['Program', 'Strategy'])['Amount'].sum().reset_index()
+    strategy_totals.columns = ['Program', 'Strategy', 'Strategy_Total']
+
+    # merge strategy totals back to get each org's percentage of its strategy
+    df_with_totals = df_grouped.merge(strategy_totals, on=['Program', 'Strategy'])
+
+    # calculate the angle each org would occupy if strategy was the full circle (360°)
+    df_with_totals['Angle_In_Strategy'] = (df_with_totals['Amount'] /
+                                           df_with_totals['Strategy_Total']) * 360
+
+    # filter organizations that would be too small
+    df_filtered = df_with_totals[df_with_totals['Angle_In_Strategy'] >= min_angle].copy()
+
+    # for each strategy, collect filtered-out orgs into "other"
+    result_rows = []
+    for (program, strategy) in df_with_totals[['Program', 'Strategy']].drop_duplicates().values:
+        strategy_data = df_with_totals[(df_with_totals['Program'] == program) &
+                                       (df_with_totals['Strategy'] == strategy)]
+
+        kept_orgs = df_filtered[(df_filtered['Program'] == program) &
+                                (df_filtered['Strategy'] == strategy)]
+        result_rows.append(kept_orgs[['Program', 'Strategy', 'Organization Name', 'Amount']])
+
+        # if there are orgs filtered out, create "other" category
+        filtered_out = strategy_data[strategy_data['Angle_In_Strategy'] < min_angle]
+        if len(filtered_out) > 0:
+            other_amount = filtered_out['Amount'].sum()
+            other_count = len(filtered_out)
+            other_row = pd.DataFrame({
+                'Program': [program],
+                'Strategy': [strategy],
+                'Organization Name': [f'Other ({other_count})'],
+                'Amount': [other_amount]
+            })
+            result_rows.append(other_row)
+
+    return pd.concat(result_rows, ignore_index=True)
+
+
+def calculate_angles_and_filter_four_level(df_grouped, min_angle=10):
+    """
+    calculate the angle each organization would occupy when its parent substrategy
+    is fully visible (360 degrees) and filter out organizations below threshold
+    """
+    # group by program, strategy, and substrategy to get substrategy totals
+    substrategy_totals = df_grouped.groupby(['Program', 'Strategy', 'Substrategy'])['Amount'].sum().reset_index()
+    substrategy_totals.columns = ['Program', 'Strategy', 'Substrategy', 'Substrategy_Total']
+
+    # merge substrategy totals back to get each org's percentage of its substrategy
+    df_with_totals = df_grouped.merge(substrategy_totals, on=['Program', 'Strategy', 'Substrategy'])
+
+    # calculate the angle each org would occupy if substrategy was the full circle (360°)
+    df_with_totals['Angle_In_Substrategy'] = (df_with_totals['Amount'] /
+                                              df_with_totals['Substrategy_Total']) * 360
+
+    # filter organizations that would be too small
+    df_filtered = df_with_totals[df_with_totals['Angle_In_Substrategy'] >= min_angle].copy()
+
+    # for each substrategy, collect filtered-out orgs into "other"
+    result_rows = []
+    for (program, strategy, substrategy) in df_with_totals[
+        ['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
+        substrategy_data = df_with_totals[(df_with_totals['Program'] == program) &
+                                          (df_with_totals['Strategy'] == strategy) &
+                                          (df_with_totals['Substrategy'] == substrategy)]
+
+        kept_orgs = df_filtered[(df_filtered['Program'] == program) &
+                                (df_filtered['Strategy'] == strategy) &
+                                (df_filtered['Substrategy'] == substrategy)]
+        result_rows.append(kept_orgs[['Program', 'Strategy', 'Substrategy', 'Organization Name', 'Amount']])
+
+        # if there are orgs filtered out, create "other" category
+        filtered_out = substrategy_data[substrategy_data['Angle_In_Substrategy'] < min_angle]
+        if len(filtered_out) > 0:
+            other_amount = filtered_out['Amount'].sum()
+            other_count = len(filtered_out)
+            other_row = pd.DataFrame({
+                'Program': [program],
+                'Strategy': [strategy],
+                'Substrategy': [substrategy],
+                'Organization Name': [f'Other ({other_count})'],
+                'Amount': [other_amount]
+            })
+            result_rows.append(other_row)
+
+    return pd.concat(result_rows, ignore_index=True)
 
 
 # data loading
@@ -214,38 +311,35 @@ if GENERATE_SUNBURST:
     fig.write_html(output_path_html)
     print(f"interactive sunburst chart saved to {output_path_html}")
 
-# three-level sunburst visualization (program > strategy > top 5 orgs per strategy)
+# complete three-level sunburst section with angle filtering
 if GENERATE_SUNBURST_THREE_LEVEL:
-    print("generating three-level sunburst (program > strategy > top 5 orgs)...")
+    print("generating three-level sunburst (program > strategy > top orgs with angle filtering)...")
 
     # prepare data with organization information
     df_three_level = df[['Program', 'Strategy', 'Organization: Organization Name', 'Amount']].copy()
     df_three_level = df_three_level.rename(columns={'Organization: Organization Name': 'Organization Name'})
+
+    # replace null/blank strategies with "unspecified" BEFORE filtering
+    df_three_level['Strategy'] = df_three_level['Strategy'].fillna('unspecified')
+
+    # now filter - keep rows with program, org name, and amount (strategy already filled)
     df_three_level = df_three_level[df_three_level['Program'].notna() &
-                                    df_three_level['Strategy'].notna() &
                                     df_three_level['Organization Name'].notna() &
                                     df_three_level['Amount'].notna()]
 
-    # replace null/blank strategies with "unspecified"
-    df_three_level['Strategy'] = df_three_level['Strategy'].fillna('unspecified')
-
     # group by program, strategy, and organization
-    df_three_grouped = df_three_level.groupby(['Program', 'Strategy', 'Organization Name'], as_index=False)[
-        'Amount'].sum()
+    df_three_grouped = df_three_level.groupby(['Program', 'Strategy', 'Organization Name'],
+                                              as_index=False)['Amount'].sum()
 
-    # for each program-strategy combination, get top 5 organizations only
-    result_rows = []
-    for (program, strategy) in df_three_grouped[['Program', 'Strategy']].drop_duplicates().values:
-        strategy_data = df_three_grouped[(df_three_grouped['Program'] == program) &
-                                         (df_three_grouped['Strategy'] == strategy)].copy()
-        strategy_data = strategy_data.sort_values('Amount', ascending=False)
+    # apply angle-based filtering
+    print(f"filtering organizations with angles less than {MIN_ANGLE_DEGREES} degrees when zoomed...")
+    df_three_final = calculate_angles_and_filter(df_three_grouped, min_angle=MIN_ANGLE_DEGREES)
 
-        # get top 5 for this strategy
-        top_5_strategy = strategy_data.head(5)
-        result_rows.append(top_5_strategy)
-
-    # combine all results
-    df_three_final = pd.concat(result_rows, ignore_index=True)
+    # sort so "other" slices appear at the end of each strategy group
+    df_three_final['Is_Other'] = df_three_final['Organization Name'].str.startswith('Other').astype(int)
+    df_three_final = df_three_final.sort_values(['Program', 'Strategy', 'Is_Other', 'Amount'],
+                                                ascending=[True, True, True, False])
+    df_three_final = df_three_final.drop('Is_Other', axis=1)
 
     # create lists for sunburst
     ids = []
@@ -258,20 +352,17 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     for program in df_three_final['Program'].unique():
         ids.append(program)
         labels.append(program)
-        parents.append('')  # no parent for top level
-        values.append(0)  # set to 0 - plotly will calculate from children
+        parents.append('')
+        values.append(0)
         colors.append(program_colors.get(program, '#CCCCCC'))
 
     # level 2: add strategy level (middle ring)
     for (program, strategy) in df_three_final[['Program', 'Strategy']].drop_duplicates().values:
-        # create unique id for strategy to avoid duplicates across programs
         strategy_id = f"{program}_{strategy}"
         ids.append(strategy_id)
-        # hide label for unspecified strategies
         labels.append('' if strategy.lower() == 'unspecified' else strategy)
         parents.append(program)
-        values.append(0)  # set to 0 - plotly will calculate from children
-        # lighten program color for strategies
+        values.append(0)
         colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.3))
 
     # level 3: add organization level (outermost ring)
@@ -281,18 +372,18 @@ if GENERATE_SUNBURST_THREE_LEVEL:
         org = row['Organization Name']
         amount = row['Amount']
 
-        # create unique id for organization
         org_id = f"{program}_{strategy}_{org}_{idx}"
         strategy_id = f"{program}_{strategy}"
 
         ids.append(org_id)
-        labels.append(org)  # display only organization name
-        # parent is the unique strategy id
+        labels.append(org)
         parents.append(strategy_id)
         values.append(amount)
 
-        # use more lightened program color for organizations
-        colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.6))
+        if org.startswith('Other'):
+            colors.append('#CCCCCC')
+        else:
+            colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.6))
 
     # create the sunburst chart
     fig = go.Figure(go.Sunburst(
@@ -309,7 +400,7 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     ))
 
     fig.update_layout(
-        title='Grants by Program, Strategy, and Top 5 Organizations per Strategy',
+        title=f'Grants by Program, Strategy, and Organizations (min {MIN_ANGLE_DEGREES}° when zoomed)',
         width=1400,
         height=1400,
         font_size=11
@@ -325,17 +416,108 @@ if GENERATE_SUNBURST_THREE_LEVEL:
     fig.write_html(output_path_html)
     print(f"interactive three-level sunburst chart saved to {output_path_html}")
 
-# four-level sunburst visualization (program > strategy > substrategy > top 5 orgs)
+    # print stats about filtering
+    original_count = len(df_three_grouped)
+    filtered_count = len(df_three_final[~df_three_final['Organization Name'].str.startswith('Other')])
+    print(f"organizations: {original_count} original, {filtered_count} after filtering")
+
+    # create directory for individual program sunbursts
+    program_dir = 'outputs/sunburst_three_level_programs'
+    os.makedirs(program_dir, exist_ok=True)
+    print(f"\ngenerating zoomed sunbursts for each program...")
+
+    # generate a zoomed sunburst for each program
+    for program in df_three_final['Program'].unique():
+        # filter data for this program only
+        program_data = df_three_final[df_three_final['Program'] == program]
+
+        # create lists for this program's sunburst (without program level)
+        prog_ids = []
+        prog_labels = []
+        prog_parents = []
+        prog_values = []
+        prog_colors = []
+
+        # add a hidden root node with empty label
+        prog_ids.append('root')
+        prog_labels.append('')
+        prog_parents.append('')
+        prog_values.append(0)
+        prog_colors.append('#FFFFFF')  # white color for hidden root
+
+        # level 1: add strategy level (child of hidden root)
+        for strategy in program_data['Strategy'].unique():
+            strategy_id = f"{program}_{strategy}"
+            prog_ids.append(strategy_id)
+            prog_labels.append('' if strategy.lower() == 'unspecified' else strategy)
+            prog_parents.append('root')  # strategies point to hidden root
+            prog_values.append(0)
+            prog_colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.3))
+
+        # level 2: add organization level
+        for idx, row in program_data.iterrows():
+            strategy = row['Strategy']
+            org = row['Organization Name']
+            amount = row['Amount']
+
+            org_id = f"{program}_{strategy}_{org}_{idx}"
+            strategy_id = f"{program}_{strategy}"
+
+            prog_ids.append(org_id)
+            prog_labels.append(org)
+            prog_parents.append(strategy_id)
+            prog_values.append(amount)
+
+            if org.startswith('Other'):
+                prog_colors.append('#CCCCCC')
+            else:
+                prog_colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.6))
+
+        # create the sunburst chart for this program
+        fig_program = go.Figure(go.Sunburst(
+            ids=prog_ids,
+            labels=prog_labels,
+            parents=prog_parents,
+            values=prog_values,
+            marker=dict(
+                colors=prog_colors,
+                line=dict(width=2, color='white')
+            ),
+            insidetextorientation='radial',
+            hovertemplate='<b>%{label}</b><br>Amount: %{value:,.0f}<extra></extra>'
+        ))
+
+        fig_program.update_layout(
+            title=f'{program} - Strategies and Organizations',
+            width=1400,
+            height=1400,
+            font_size=11
+        )
+
+        # create clean filename from program name
+        program_filename = program.replace(' ', '_').replace('&', 'and').replace(':', '').lower()
+
+        # save as png
+        output_path_png = f'{program_dir}/{program_filename}_zoomed.png'
+        fig_program.write_image(output_path_png)
+
+        # save as svg for editing in illustrator
+        output_path_svg = f'{program_dir}/{program_filename}_zoomed.svg'
+        fig_program.write_image(output_path_svg)
+
+        print(f"saved zoomed sunburst for {program}")
+
+# four-level sunburst visualization (program > strategy > substrategy > top orgs with angle filtering)
 if GENERATE_SUNBURST_FOUR_LEVEL:
-    print("generating four-level sunburst (program > strategy > substrategy > top 5 orgs)...")
+    print("generating four-level sunburst (program > strategy > substrategy > top orgs with angle filtering)...")
 
     # prepare data with organization information
     df_four_level = df[['Program', 'Strategy', 'Substrategy', 'Organization: Organization Name', 'Amount']].copy()
     df_four_level = df_four_level.rename(columns={'Organization: Organization Name': 'Organization Name'})
     df_four_level = df_four_level[df_four_level['Program'].notna() &
-                                   df_four_level['Strategy'].notna() &
-                                   df_four_level['Organization Name'].notna() &
-                                   df_four_level['Amount'].notna()]
+                                  df_four_level['Strategy'].notna() &
+                                  df_four_level['Organization Name'].notna() &
+                                  df_four_level['Amount'].notna()]
 
     # replace null/blank strategies and substrategies with "unspecified"
     df_four_level['Strategy'] = df_four_level['Strategy'].fillna('unspecified')
@@ -345,33 +527,15 @@ if GENERATE_SUNBURST_FOUR_LEVEL:
     df_four_grouped = df_four_level.groupby(['Program', 'Strategy', 'Substrategy', 'Organization Name'],
                                             as_index=False)['Amount'].sum()
 
-    # for each program-strategy-substrategy combination, get top 5 organizations only
-    result_rows = []
-    for (program, strategy, substrategy) in df_four_grouped[['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
-        substrategy_data = df_four_grouped[(df_four_grouped['Program'] == program) &
-                                           (df_four_grouped['Strategy'] == strategy) &
-                                           (df_four_grouped['Substrategy'] == substrategy)].copy()
-        substrategy_data = substrategy_data.sort_values('Amount', ascending=False)
+    # apply angle-based filtering
+    print(f"filtering organizations with angles less than {MIN_ANGLE_DEGREES} degrees when zoomed...")
+    df_four_final = calculate_angles_and_filter_four_level(df_four_grouped, min_angle=MIN_ANGLE_DEGREES)
 
-        # get top 5 for this substrategy
-        top_5_substrategy = substrategy_data.head(5)
-        result_rows.append(top_5_substrategy)
-
-        # if there are more than 5 organizations, lump the rest into "other"
-        if len(substrategy_data) > 5:
-            other_amount = substrategy_data.iloc[5:]['Amount'].sum()
-            other_count = len(substrategy_data) - 5
-            other_row = pd.DataFrame({
-                'Program': [program],
-                'Strategy': [strategy],
-                'Substrategy': [substrategy],
-                'Organization Name': [f'Other ({other_count})'],
-                'Amount': [other_amount]
-            })
-            result_rows.append(other_row)
-
-    # combine all results
-    df_four_final = pd.concat(result_rows, ignore_index=True)
+    # sort so "Other" slices appear at the end of each substrategy group
+    df_four_final['Is_Other'] = df_four_final['Organization Name'].str.startswith('Other').astype(int)
+    df_four_final = df_four_final.sort_values(['Program', 'Strategy', 'Substrategy', 'Is_Other', 'Amount'],
+                                              ascending=[True, True, True, True, False])
+    df_four_final = df_four_final.drop('Is_Other', axis=1)
 
     # create lists for sunburst
     ids = []
@@ -401,7 +565,8 @@ if GENERATE_SUNBURST_FOUR_LEVEL:
         colors.append(lighten_color(program_colors.get(program, '#CCCCCC'), factor=0.25))
 
     # level 3: add substrategy level
-    for (program, strategy, substrategy) in df_four_final[['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
+    for (program, strategy, substrategy) in df_four_final[
+        ['Program', 'Strategy', 'Substrategy']].drop_duplicates().values:
         # create unique id for substrategy
         strategy_id = f"{program}_{strategy}"
         substrategy_id = f"{program}_{strategy}_{substrategy}"
@@ -452,7 +617,7 @@ if GENERATE_SUNBURST_FOUR_LEVEL:
     ))
 
     fig.update_layout(
-        title='Grants by Program, Strategy, Substrategy, and Top 5 Organizations',
+        title=f'Grants by Program, Strategy, Substrategy, and Organizations (min {MIN_ANGLE_DEGREES}° when zoomed)',
         width=1600,
         height=1600,
         font_size=10
@@ -472,6 +637,11 @@ if GENERATE_SUNBURST_FOUR_LEVEL:
     output_path_html = 'outputs/sunburst_four_level.html'
     fig.write_html(output_path_html)
     print(f"interactive four-level sunburst chart saved to {output_path_html}")
+
+    # print stats about filtering
+    original_count = len(df_four_grouped)
+    filtered_count = len(df_four_final[~df_four_final['Organization Name'].str.startswith('Other')])
+    print(f"organizations: {original_count} original, {filtered_count} after filtering")
 
 # treemap by program and top 10 grantees per program
 if GENERATE_TREEMAP_TOP_GRANTEES:
@@ -500,9 +670,10 @@ if GENERATE_TREEMAP_TOP_GRANTEES:
         # if there are more than 10 grantees, lump the rest into "other"
         if len(program_data) > 10:
             other_amount = program_data.iloc[10:]['Amount'].sum()
+            other_count = len(program_data) - 10
             other_row = pd.DataFrame({
                 'Program': [program],
-                'Organization Name': ['Other'],
+                'Organization Name': [f'Other ({other_count})'],
                 'Amount': [other_amount]
             })
             result_rows.append(other_row)
@@ -543,7 +714,7 @@ if GENERATE_TREEMAP_TOP_GRANTEES:
         values.append(amount)
 
         # use grey for "other", lightened program color for specific grantees
-        if grantee == 'Other':
+        if grantee.startswith('Other'):
             colors.append('#CCCCCC')
         else:
             colors.append(lighten_color(program_colors.get(program, '#CCCCCC')))
