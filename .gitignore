@@ -1,4 +1,10 @@
 ### Python template
+# Project specific
+outputs/
+finals/
+v1/
+00OUf000008PyafMAC_mapped.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
