@@ -1,9 +1,8 @@
 ### Python template
-# Project specific
-outputs/
 finals/
-v1/
-00OUf000008PyafMAC_mapped.csv
+outputs/
+outputsx/
+*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
